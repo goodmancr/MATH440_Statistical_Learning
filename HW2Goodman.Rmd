@@ -1,0 +1,106 @@
+---
+title: "HW2"
+author: "Caroline Goodman"
+date: "2022-11-12"
+output: html_document
+---
+
+A. Split the data into 80:20 partition.
+
+```{r}
+rm(list = ls())
+
+bos <- read.csv("~/Desktop/MATH 440 - Statistical Learning/BostonHousing.csv")
+#remove MEDV
+boston <- bos[,-13]
+
+source("~/Desktop/Math 440 - Statistical Learning/myfunctions.R")
+RNGkind (sample.kind = "Rounding") 
+set.seed(0) ## set seed so that you get same partition each time
+p2 <- partition.2(boston, 0.8) ## creating 80:20 partition
+training.data <- p2$data.train
+test.data <- p2$data.test
+```
+
+1. Build a k-nearest neighbor model. Clearly show the model building steps for full credit. What is the optimal number of neighbors?
+
+Optimal # of neighbors: 5
+
+2. Evaluate the predictive performance of this model on test data.
+
+Fitting the model to a 5-nearest neighbor model results in an RMSE value of 0.2102434 and an Rsquared value of 0.6666319. From the confusion matrix, we see that the model has a kappa value = 0.6411, specificity = 0.5556, and sensitivity = 0.9880.
+
+```{r}
+bos$CAT..MEDV <- as.factor(bos$CAT..MEDV)
+levels(bos$CAT..MEDV) <- c("no", "yes")
+
+training.scaled <- scale(training.data[,-13], center = TRUE, scale = TRUE)
+training.scaled.wY <- cbind(training.scaled, training.data[,13])
+training.scaled.attr <- attributes(training.scaled)
+
+test.scaled <- scale(test.data[,-13], 
+                     center = training.scaled.attr$`scaled:center`, 
+                     scale = training.scaled.attr$`scaled:scale`)
+training.data.Y <- training.data[13]
+
+library(FNN)
+library(caret)
+
+Knn <- knn(train = training.scaled, test = test.scaled,
+           cl = training.data[,13], k = 5)
+Knn
+
+set.seed(0)
+train_control <- trainControl(method = "cv", number = 10)
+Knn_kcv <- train(CAT..MEDV ~., data = training.data, method = "knn",
+                 trControl = train_control, preProcess = c("center","scale"),
+                 metric = "RMSE")
+print(Knn_kcv)
+plot(Knn_kcv)
+Knn_kcv$finalModel
+
+confusionMatrix(as.factor(Knn), as.factor(test.data[,13]))
+
+```
+
+
+B.
+
+1. Fit a classification tree using cost complexity pruning. Clearly show the model building steps for full credit. Evaluate the predictive performance.
+
+Fitting a classification tree results in an RMSE value of 0.2120486 and an Rsquared value of 0.6595591 From the confusion matrix, we see that the model has a kappa value = 0.8104, specificity = 0.7222, and sensitivity = 1.0000
+
+```{r}
+library(rpart)
+library(rpart.plot)
+
+ct1 <- rpart(CAT..MEDV ~ . , data = training.data, method = "class", 
+             minsplit=15, minbucket = 5)
+# plot tree
+prp(ct1, type = 1, extra = 1, under = TRUE, split.font = 2, varlen = -10)
+
+# variable importance
+ct1$variable.importance
+
+# get predicted class on the test data
+pred.test = predict(ct1, test.data, type = 'class')
+
+# cost complexity cross validation
+library(caret)
+set.seed(0)
+train_control <- trainControl(method="cv", number=10)
+cv.ct <- train(CAT..MEDV ~ . , data = training.data, method = "rpart",
+                   trControl = train_control, tuneLength = 10)
+print(cv.ct)
+plot(cv.ct)
+
+# get prediction on the test data
+pred.test.prune = predict(cv.ct$finalModel, test.data)
+pred.test.prune = as.integer(pred.test.prune)
+pred.test.prune <- factor(pred.test.prune, levels = c("0", "1"))
+confusionMatrix(pred.test.prune, as.factor(test.data$CAT..MEDV))
+```
+
+C. Compare the performances of the two models that you built in this assignment.
+
+The two models performed relatively well, but the classification tree seemed to perform better. The 5-nearest neighbors model resulted in a kappa value of 0.6411 while the classification tree kappa value was 0.8104. The specificity was much higher with the classification tree as well. The sensitivity for the classification tree, however, reveals possible overfitting with a value of 1.0... Ultimately, the models performed similarly with regard to RMSE, both rounding to 0.21. The Rsquared values are also similar for both, but the classification tree topped the 5-nearest neighbors model again with a value of 0.6596 (5-nearest neighbors Rsquared = 0.6666). Both models would be a good pick when attempting to solve this problem, but the classification tree performed a little better in some aspects. 

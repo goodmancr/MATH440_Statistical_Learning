@@ -1,0 +1,780 @@
+---
+title: "MATHH440FINAL"
+author: "Caroline Goodman"
+date: "2022-12-07"
+output: html_document
+---
+
+# Example of k-nearest neighbors for classification problem using R
+```{r}
+diabetes <- read.csv("~/Desktop/MATH 440 - Statistical Learning/diabetes.csv")
+diabetes$Outcome <- as.factor(diabetes$Outcome)
+levels(diabetes$Outcome) <- c("no", "yes")
+source("~/Desktop/MATH 440 - Statistical Learning/myfunctions.R")
+```
+Split into training, validation, and testing.
+```{r}
+RNGkind(sample.kind = "Rounding")
+set.seed(0)
+p3 <- partition.3(diabetes, 0.7, 0.2)
+training.data <- p3$data.train
+validation.data <- p3$data.val
+test.data <- p3$data.test
+```
+Rescale the data.
+```{r}
+training.scaled <- scale(training.data[,-9], center = TRUE, scale = TRUE)
+training.scaled.wY <- cbind(training.scaled, training.data[,9])
+training.scaled.attr <- attributes(training.scaled)
+val.scaled <- scale(validation.data[,-9],
+                    center = training.scaled.attr$'scaled:center',
+                    scale = training.scaled.attr$'scaled:scale')
+test.scaled <- scale(test.data[,-9], 
+                     center = training.scaled.attr$'scaled:center',
+                     scale = training.scaled.attr$'scaled:scale')
+```
+Fit knn model on single new observation with k = 5.
+```{r}
+newObs <- data.frame(Pregnancies = 3,
+                     Glucose = 120,
+                     BloodPressure = 70,
+                     SkinThickness = 20,
+                     Insulin = 80,
+                     BMI = 30,
+                     DiabetesPedigreeFunction = 0.44,
+                     Age = 46)
+newObs.scaled <- scale(newObs,
+                       center = training.scaled.attr$'scaled:center',
+                       scale = training.scaled.attr$'scaled:scale')
+library(FNN)
+Knn <- knn(train = training.scaled,
+           test = newObs.scaled,
+           cl = training.data[,9],
+           k = 5)
+Knn
+```
+Labels of nearest neighbors:
+```{r}
+Knn.attr <- attributes(Knn)
+training.data[Knn.attr$nn.index, 9]
+```
+By the majority rule, we assign class membership "no" or 0 to the new observation.
+
+### Note: The rule of majority is the same as using 0.5 cut-off value.
+### If different cutoff is needed, calculate the proportion of "yes" labels
+### among the k-nearest neighbors and use a cutoff on that
+```{r}
+# collect the labels of the nearest neighbors
+k.labels <- training.data[Knn.attr$nn.index, 9]
+K <- 5
+cutoff <- 0.3
+pred <- ifelse((sum(k.labels == "yes")/K) >= cutoff, "yes", "no")
+pred
+```
+Fit k-nn model on validation data with k=5
+```{r}
+library(FNN)
+library(caret)
+Knn <- knn(train = training.scaled, test = val.scaled,
+           cl = training.data[,9], k = 5)
+confusionMatrix(as.factor(Knn), as.factor(validation.data[,9]), 
+                positive = "yes")
+```
+Use validation data to find optimal k.
+```{r}
+## fit knn model for k = 1, ..., 100
+K <- 100
+kappa <- rep(0,K)
+for (kk in 1:K) {
+  Knn <- knn(train = training.scaled, 
+             test = val.scaled,
+             cl = training.data[,9],
+             k = kk)
+  c <- confusionMatrix(as.factor(Knn), 
+                       as.factor(validation.data[,9]),
+                       positive = "yes")
+  kappa[kk] <- c$overall["Kappa"]
+  cat("K", kk, "Kappa", kappa[kk], "\n")
+}
+# create a plot for k vs. kappa
+plot(c(1:K), kappa, xlab = "k", ylab = "Kappa", type = "l", col = "blue")
+```
+
+Get final model and evaluate on test data.
+```{r}
+training.data.all <- rbind(training.data, validation.data)
+training.data.scaled.all <- rbind(training.scaled, val.scaled)
+Knn <- knn(train = training.data.scaled.all, 
+           test = test.scaled,
+           cl = training.data.all[,9],
+           k = which.max(kappa))
+confusionMatrix(as.factor(Knn), 
+                as.factor(test.data[,9]),
+                positive = "yes")
+```
+Using cross-validation approach.
+```{r}
+## K-fold Cross Validation
+# value of K equal to 10 
+set.seed(0)
+train_control <- trainControl(method = "cv", 
+                              number = 10) 
+training.data.all <- rbind(training.data, validation.data)
+# Fit K-fold CV model  
+Knn_kcv <- train(Outcome ~ ., data = training.data.all, method = "knn", 
+                 trControl = train_control, preProcess = c("center","scale"), 
+                 tuneLength = 20, metric = "Kappa")
+print(Knn_kcv)
+Knn_kcv$finalModel
+```
+Fit knn model on test data with k = 11
+```{r}
+training.data.scaled.all <- rbind(training.scaled, val.scaled)
+Knn <- knn(train = training.data.scaled.all,
+           test = test.scaled,
+           cl = training.data.all[,9], k = 11)
+confusionMatrix(as.factor(Knn), as.factor(test.data[,9]),
+                positive = "yes")
+```
+
+# Example of k-nearest neighbors for regression problem using R
+```{r}
+autompg <- read.csv("~/Desktop/MATH 440 - Statistical Learning/autompg.csv")
+
+source("~/Desktop/MATH 440 - Statistical Learning/myfunctions.R")
+```
+Partition the data.
+```{r}
+RNGkind (sample.kind = "Rounding") 
+set.seed(0)
+### call the function for creating 60:30:10 partition
+p3 <- partition.3(autompg, 0.6, 0.3)
+training.data <- p3$data.train
+validation.data <- p3$data.val
+test.data <- p3$data.test
+```
+Rescale the data.
+```{r}
+### Rescale the data
+training.scaled <- scale(training.data[,-1], center = TRUE, scale = TRUE)
+training.scaled.wY <- cbind(training.scaled, training.data[,1])
+training.scaled.attr <- attributes(training.scaled)
+val.scaled <- scale(validation.data[,-1], 
+                    center = training.scaled.attr$`scaled:center`, 
+                    scale = training.scaled.attr$`scaled:scale`)
+test.scaled <- scale(test.data[,-1], 
+                     center = training.scaled.attr$`scaled:center`, 
+                     scale = training.scaled.attr$`scaled:scale`)
+```
+Fit kNN model on validation data with k=5
+```{r}
+library(FNN)
+Knn <- knn.reg(train = training.scaled, test = val.scaled,
+               y = training.data[,1], k = 5)
+Knn
+```
+RMSE for validation data
+```{r}
+error.val.knn <- Knn$pred - validation.data$mpg
+rmse.val.knn <- sqrt(mean(error.val.knn^2))
+rmse.val.knn
+```
+K-Fold Cross Validation
+```{r}
+# value of K equal to 10 
+set.seed(0)
+train_control <- trainControl(method = "cv", 
+                              number = 10) 
+training.data.all <- rbind(training.data, validation.data)
+```
+Fit K-Fold Cross Validation model.
+```{r}
+Knn_kcv <- train(mpg ~ ., 
+                 data = training.data.all, 
+                 method = "knn", 
+                 trControl = train_control, 
+                 preProcess = c("center","scale"),
+                 tuneLength = 20, 
+                 metric = "RMSE")
+print(Knn_kcv)
+plot(Knn_kcv)
+Knn_kcv$finalModel
+```
+Fit knn model on test data with k = 11.
+```{r}
+### fit k-nn model on test data with k=11
+training.data.scaled.all <- rbind(training.scaled, val.scaled)
+Knn <- knn.reg(train = training.data.scaled.all, test = test.scaled,
+               y = training.data.all[,1], k = 11)
+```
+Calculate RMSE for test data.
+```{r}
+error.test.knn <- Knn$pred - test.data$mpg
+rmse.test.knn <- sqrt(mean(error.test.knn^2))
+rmse.test.knn
+```
+
+# PRINCIPAL COMPONENT ANALYSIS
+```{r}
+autompg <- read.csv("~/Desktop/MATH 440 - Statistical Learning/autompg.csv")
+```
+
+Partition the data.
+```{r}
+Dat <- autompg
+RNGkind (sample.kind = "Rounding") 
+set.seed(0) ## set seed so that you get same partition each time
+p3 <- partition.3(Dat, 0.7, 0.2) ## creating 70:20:10 partition
+training.data <- p3$data.train
+validation.data <- p3$data.val
+test.data <- p3$data.test
+```
+Fit MLR model on training data.
+```{r}
+mlr.train <- lm(mpg ~ ., data = training.data)
+summary(mlr.train)
+```
+Calculate RMSE for training data.
+```{r}
+error.train <-  training.data$mpg - mlr.train$fitted.values
+rmse.train <- sqrt(mean(error.train^2))
+rmse.train
+```
+Prediction on Validation Data
+```{r}
+yhat = predict(mlr.train, newdata=validation.data)
+```
+Calculate RMSE for validation data.
+```{r}
+error.val <- validation.data$mpg - yhat
+rmse.val <- sqrt(mean(error.val^2))
+rmse.val
+```
+Prediction on test data.
+```{r}
+yhat = predict(mlr.train, newdata = test.data)
+```
+Calculate RMSE for test data.
+```{r}
+error.test <- test.data$mpg - yhat
+rmse.test <- sqrt(mean(error.test^2))
+rmse.test
+```
+Create principal components.
+```{r}
+# check correlation
+library(corrplot)
+corvar <- cor(training.data[,-1], method="pearson")
+corrplot(corvar, method= "color", order = "hclust", tl.pos = 'lt')
+```
+Scale the data
+```{r}
+training.scaled <- scale(training.data[,-1], center = TRUE, scale = TRUE)
+```
+Create principal components.
+```{r}
+pca <- prcomp(training.scaled, center = TRUE, scale. = TRUE) 
+summary(pca)
+pca$rotation
+pcs <- as.data.frame(pca$x)
+```
+Plot principal components.
+```{r}
+plot(pca)
+biplot (pca , scale =0)
+```
+Check correlation of PCs.
+```{r}
+corvarpc <- cor(pcs, method="pearson")
+corrplot(corvarpc, method= "color", order = "hclust", tl.pos = 'lt')
+```
+% Variance explained by each PC
+```{r}
+summPC <- summary(pca)
+plot(summary(pca)$importance[3,], pch = 19, ylab = "Cumulative Proportion of Variance", xlab = "Index of PC")
+```
+Scatter plot of scaled response vs. PCs
+```{r}
+par(mfrow = c(1, 3))
+plot(training.data$mpg, pcs$PC1)
+plot(training.data$mpg, pcs$PC2)
+plot(training.data$mpg, pcs$PC3)
+```
+MLR using PCA
+```{r}
+pcs <- as.data.frame(pca$x)
+lr.data <- cbind(training.data$mpg, pcs) # create a data set with mpg and principal components
+colnames(lr.data)[1] <- "mpg"
+mlr.pc.train <- lm(mpg ~ PC1+PC2+PC3+PC4+PC5+PC6, data = lr.data)
+summary(mlr.pc.train)
+```
+Scaling validation data.
+```{r}
+training.scaled.attr <- attributes(training.scaled)
+val.scaled <- scale(validation.data[,-1], 
+                    center = training.scaled.attr$`scaled:center`, 
+                    scale = training.scaled.attr$`scaled:scale`)
+```
+Create PC's on validation data.
+```{r}
+val.pcs <- matrix(NA, nrow = nrow(val.scaled), ncol = ncol(val.scaled))
+loading <- pca$rotation
+val.pcs <- val.scaled %*%loading
+```
+Model performance on validation data
+```{r}
+yhat = predict(mlr.pc.train, newdata=as.data.frame(val.pcs))
+error.val.pc <- validation.data$mpg - yhat
+rmse.val.pc <- sqrt(mean(error.val.pc^2))
+rmse.val.pc
+```
+Determine optimal number of PCs.
+```{r}
+rmse.val.pc <- rep(NA, 6)
+# Model with 1 PC
+mlr.pc1.train <- lm(mpg ~ PC1, data = lr.data)
+yhat = predict(mlr.pc1.train, newdata=as.data.frame(val.pcs))
+error.val.pc <- validation.data$mpg - yhat
+rmse.val.pc[1] <- sqrt(mean(error.val.pc^2))
+# Model with 2 PC
+mlr.pc2.train <- lm(mpg ~ PC1+PC2, data = lr.data)
+yhat = predict(mlr.pc2.train, newdata=as.data.frame(val.pcs))
+error.val.pc <- validation.data$mpg - yhat
+rmse.val.pc[2] <- sqrt(mean(error.val.pc^2))
+# Model with 3 PC
+mlr.pc3.train <- lm(mpg ~ PC1+PC2+PC3, data = lr.data)
+yhat = predict(mlr.pc3.train, newdata=as.data.frame(val.pcs))
+error.val.pc <- validation.data$mpg - yhat
+rmse.val.pc[3] <- sqrt(mean(error.val.pc^2))
+# Model with 4 PC
+mlr.pc4.train <- lm(mpg ~ PC1+PC2+PC3+PC4, data = lr.data)
+yhat = predict(mlr.pc4.train, newdata=as.data.frame(val.pcs))
+error.val.pc <- validation.data$mpg - yhat
+rmse.val.pc[4] <- sqrt(mean(error.val.pc^2))
+# Model with 5 PC
+mlr.pc5.train <- lm(mpg ~ PC1+PC2+PC3+PC4+PC5, data = lr.data)
+yhat = predict(mlr.pc5.train, newdata=as.data.frame(val.pcs))
+error.val.pc <- validation.data$mpg - yhat
+rmse.val.pc[5] <- sqrt(mean(error.val.pc^2))
+# Model with 6 PC
+mlr.pc6.train <- lm(mpg ~ PC1+PC2+PC3+PC4+PC5+PC6, data = lr.data)
+yhat = predict(mlr.pc6.train, newdata=as.data.frame(val.pcs))
+error.val.pc <- validation.data$mpg - yhat
+rmse.val.pc[6] <- sqrt(mean(error.val.pc^2))
+plot(seq(1:6), rmse.val.pc, xlab = "# PCs used in model", ylab = "RMSE", pch = 19, type = "l")
+abline(v=3, col = "blue", lty=3)
+```
+Fit final model on combined training and validation data.
+```{r}
+training.data.all <- rbind(training.data, validation.data)
+```
+Scale the data.
+```{r}
+training.scaled.all <- scale(training.data.all[,-1], center = TRUE, scale = TRUE)
+```
+Create principal components
+```{r}
+pca <- prcomp(training.scaled.all, center = TRUE, scale. = TRUE) 
+pcs <- as.data.frame(pca$x)
+```
+MLR using all PCs
+```{r}
+lr.data.all <- cbind(training.data.all$mpg, pcs) # create a data set with mpg and principal components
+colnames(lr.data.all)[1] <- "mpg"
+mlr.pc.train.all <- lm(mpg ~ PC1+PC2+PC3, data = lr.data.all) # fit model with 3 principal components
+```
+Scaling test data
+```{r}
+training.scaled.all.attr <- attributes(training.scaled.all)
+test.scaled <- scale(test.data[,-1], 
+                    center = training.scaled.all.attr$`scaled:center`, 
+                    scale = training.scaled.all.attr$`scaled:scale`)
+```
+Create PC's on test data
+```{r}
+loading <- pca$rotation
+test.pcs <- test.scaled%*%loading
+```
+Model performance on test data
+```{r}
+yhat = predict(mlr.pc.train.all, newdata=as.data.frame(test.pcs))
+error.test.pc <- test.data$mpg - yhat
+rmse.test.pc <- sqrt(mean(error.test.pc^2))
+rmse.test.pc
+```
+
+# CLASSIFICATION TREE
+```{r}
+diabetes <- read.csv("~/Desktop/MATH 440 - Statistical Learning/diabetes.csv")
+diabetes$Outcome <- as.factor(diabetes$Outcome)
+levels(diabetes$Outcome) <- c("no", "yes")
+source("~/Desktop/MATH 440 - Statistical Learning/myfunctions.R")
+```
+Partition the data.
+```{r}
+RNGkind (sample.kind = "Rounding") 
+set.seed(0)
+### call the function for creating 70:30 partition
+p2 <- partition.2(diabetes, 0.7)
+training.data <- p2$data.train
+test.data <- p2$data.test
+```
+Fit classification tree on training data.
+```{r}
+library(rpart)
+library(rpart.plot)
+# minsplit: minimum number of observations that must exist 
+# in a node in order for a split to be attempted. The default value is 20. 
+# minbucket = minimum number of required observations 
+# in the terminal nodes for the split to happen.
+ct1 <- rpart(Outcome ~ . , data = training.data, method = "class", 
+             minsplit=15, minbucket = 5)
+# plot tree
+prp(ct1, type = 1, extra = 1, under = TRUE, split.font = 2, varlen = -10)
+```
+Variable Importance
+```{r}
+ct1$variable.importance
+```
+Get predicted class on test data
+```{r}
+pred.test = predict(ct1, test.data, type = 'class')
+```
+Create confusion matrix.
+```{r}
+library(caret)
+confusionMatrix(pred.test, test.data$Outcome, positive = "yes")
+```
+Cost Complexity Cross Validation
+```{r}
+library(caret)
+set.seed(0)
+train_control <- trainControl(method="cv", number=10)
+cv.ct <- train(Outcome ~ . , data = training.data, method = "rpart",
+                   trControl = train_control, tuneLength = 10)
+print(cv.ct)
+plot(cv.ct)
+```
+Get final model.
+```{r}
+cv.ct$finalModel
+prp(cv.ct$finalModel, type = 1, extra = 1, under = TRUE, split.font = 2, varlen = -10)
+
+```
+Variable Importance
+```{r}
+cv.ct$finalModel$variable.importance
+summary(cv.ct$finalModel)
+```
+Prediction on Test Data
+```{r}
+pred.test.prune = predict(cv.ct$finalModel, test.data, type = 'class')
+```
+Create confusion matrix.
+```{r}
+confusionMatrix(pred.test.prune, test.data$Outcome, positive = "yes")
+```
+Using different cutoff values, predict raw probability
+```{r}
+pred.prob = predict(cv.ct$finalModel, test.data, type = 'prob')
+head(pred.prob)
+cutoff <- 0.3 # if proportion of occurrences of class "yes" > cutoff then predicted label = "yes"
+pred.test.cutoff <- ifelse(pred.prob[,2] >= cutoff, "yes", "no")
+confusionMatrix(as.factor(pred.test.cutoff), as.factor(test.data$Outcome), positive = "yes")
+```
+# REGRESSION TREE
+```{r}
+autompg <- read.csv("~/Desktop/MATH 440 - Statistical Learning/autompg.csv")
+```
+Partitiion the data.
+```{r}
+RNGkind (sample.kind = "Rounding") 
+set.seed(0)
+p2 <- partition.2(autompg, 0.6)
+mydata.train <- p2$data.train
+mydata.test <- p2$data.test
+```
+Fit regression tree on training data.
+```{r}
+ct1 <- rpart(mpg ~ . , data = mydata.train, method = "anova", 
+             minsplit=15, minbucket = 5)
+# plot tree
+prp(ct1, type = 1, extra = 1, under = TRUE, split.font = 2, varlen = -10)
+```
+Get prediction on test data.
+```{r}
+pred.test = predict(ct1, mydata.test)
+```
+Get MSE on test data.
+```{r}
+rmse_test <- sqrt(mean((mydata.test$mpg - pred.test)^2))
+rmse_test
+```
+Fit regression tree using cost complexity cross validation
+```{r}
+library(caret)
+set.seed(0)
+train_control <- trainControl(method="cv", number=10)
+cv.ct <- train(mpg ~ . , data = mydata.train, method = "rpart",
+               trControl = train_control, tuneLength = 10)
+print(cv.ct)
+cv.ct$finalModel
+prp(cv.ct$finalModel, type = 1, extra = 1, under = TRUE, split.font = 2, varlen = -10)
+```
+Get prediction on test data.
+```{r}
+pred.test = predict(cv.ct$finalModel, mydata.test)
+```
+Get MSE on test data.
+```{r}
+rmse_test_prune <- sqrt(mean((mydata.test$mpg - pred.test)^2))
+rmse_test_prune
+```
+# BOOTSTRAP
+```{r}
+set.seed(1)
+library(rsample)
+height <- as.data.frame(round(runif(15, 60, 72)))
+## original data
+t(height)
+```
+Traditional Confidence Intervals
+```{r}
+c(mean(height[,1]) - qt(.975,14)*sd(height[,1])/sqrt(15), mean(height[,1]) + qt(.975,14)*sd(height[,1])/sqrt(15))
+```
+Traditional confidence intervals using R function
+```{r}
+library(Rmisc)
+CI(height[,1], ci=0.95)
+```
+Get confidence interval using bootstrapping.
+```{r}
+## create 2000 bootstrap samples
+bt_samples <- bootstraps(height, times = 2000)
+```
+Example of first bootstrap sample.
+```{r}
+height[bt_samples$splits[1][[1]]$in_id,]
+```
+Example of second bootstrap sample.
+```{r}
+height[bt_samples$splits[2][[1]]$in_id,]
+```
+Calculate the mean on each bootstrap sample.
+```{r}
+bt_mean <- rep(NA, 2000)
+for (i in 1:2000){
+  bt_mean[i] <- mean(height[bt_samples$splits[i][[1]]$in_id,])
+}
+hist(bt_mean, main = "sampling distribution of bootstrap mean")
+```
+95% confidence interval for mean height using bootstrapping 
+```{r}
+quantile(bt_mean, probs = c(0.025, 0.975))
+```
+
+# ENSEMBLE CLASSIFICATION
+```{r}
+RNGkind (sample.kind = "Rounding") 
+set.seed(0)
+### call the function for creating 70:30 partition
+p2 <- partition.2(diabetes, 0.7)
+training.data <- p2$data.train
+test.data <- p2$data.test
+```
+Bagging
+```{r}
+library(caret)
+set.seed(0)
+modelLookup("treebag")
+train_control <- trainControl(method="cv", number=10)
+## specify nbagg to control the number of trees. default value is 25 
+bag <- train(Outcome ~ . , data = training.data, method = "treebag",
+               trControl = train_control, nbagg = 50)
+print(bag)
+plot(varImp(bag))
+#dev.copy2pdf(file = "E:/Data mining/Lecture Notes/plots/bag1.pdf")
+bag$finalModel
+
+# get prediction on the test data
+pred.test.bag = predict(bag$finalModel, test.data, type = 'class')
+
+# create confusion matrix
+confusionMatrix(pred.test.bag, test.data$Outcome, positive = "yes")
+```
+Random Forest
+```{r}
+library(caret)
+set.seed(0)
+modelLookup("rf")
+train_control <- trainControl(method="cv", number=10)
+rf <- train(Outcome ~ . , data = training.data, method = "rf",
+             trControl = train_control, tuneLength = 3)
+# metric = "Kappa" may be mentioned if best tree should be selected based on that
+print(rf)
+plot(varImp(rf))
+rf$finalModel
+
+# get prediction on the test data
+pred.test.rf = predict(rf$finalModel, test.data, type = 'class')
+
+# create confusion matrix
+confusionMatrix(pred.test.rf, test.data$Outcome, positive = "yes")
+```
+Adaboost
+```{r}
+library(caret)
+library(ada)
+modelLookup("ada")
+set.seed(0)
+train_control <- trainControl(method="cv", number=10)
+ada <- train(Outcome ~ . , data = training.data, method = "ada",
+            trControl = train_control, tuneLength = 3)
+
+print(ada)
+plot(varImp(ada))
+
+# get prediction on the test data
+pred.test.ada = predict(ada$finalModel, test.data)
+
+# create confusion matrix
+confusionMatrix(pred.test.ada, test.data$Outcome, positive = "yes")
+```
+# Neural Net Classification
+```{r}
+### Create tiny.data dataframe
+Fat <- c(0.2, 0.1, 0.2, 0.2, 0.4, 0.3)
+Salt <- c(0.9, 0.1, 0.4, 0.5, 0.5, 0.8)
+Y <- c("like", "dislike", "dislike", "dislike", "like","like")
+tiny.data <- data.frame(Fat, Salt, Y)
+
+### create dummies for variables with multiple categories
+table(tiny.data$Y)
+tiny.data$Like <- ifelse(tiny.data$Y == "like", 1, 0)
+tiny.data$Dislike <- ifelse(tiny.data$Y == "dislike", 1, 0)
+
+### get rid of the mutiple category variables (only keep dummies)
+tiny.data <- tiny.data[, -3]
+```
+Run neural net with 3 hidden nodes.
+```{r}
+library(neuralnet)
+RNGkind (sample.kind = "Rounding") 
+set.seed(0)
+nn <- neuralnet(Like + Dislike ~ Salt + Fat, 
+                data = tiny.data, hidden = 3)
+```
+Display weights.
+```{r}
+nn$weights
+```
+Plot network.
+```{r}
+plot(nn, rep = "best")
+```
+Display predictions.
+```{r}
+nn$net.result
+nn$response
+```
+Run neural network with 2 layers. 
+
+Layer 1 has 2 hidden nodes, layer 2 has 3 hidden nodes.
+```{r}
+nn2 <- neuralnet(Like + Dislike ~ Salt + Fat, 
+                data = tiny.data, hidden = c(2,3))
+### plot network
+plot(nn2, rep="best")
+```
+# Neural Network for Classification Problem
+```{r}
+RNGkind (sample.kind = "Rounding") 
+set.seed(0)
+### call the function for creating 70:30 partition
+p2 <- partition.2(diabetes, 0.7)
+training.data <- p2$data.train
+test.data <- p2$data.test
+
+library(caret)
+library(nnet)
+train_control <- trainControl(method="cv", number=10)
+## size refers to the number of hidden nodes and decay is the learning rate
+tune.grid <- expand.grid(size = seq(from = 1, to = 10, by = 1),
+                         decay = seq(from = 0.1, to = 0.5, by = 0.1))
+cv.nn <- train(Outcome ~ . , data = training.data, method = "nnet",
+               preProc = c("center", "scale"),
+               trControl = train_control, tuneGrid = tune.grid)
+print(cv.nn)
+plot(cv.nn)
+```
+Best size and decay:
+```{r}
+cv.nn$bestTune
+```
+Prediction on test data
+```{r}
+pred.prob <- predict(cv.nn, test.data, type = "prob")
+pred.y.nn <- ifelse(pred.prob[,2] > 0.5, "yes", "no") # using cutoff = 0.5
+confusionMatrix(as.factor(pred.y.nn), as.factor(test.data$Outcome), 
+                positive = "yes")
+```
+Plotting neural network using neuralnet package
+```{r}
+training.data.nn <- training.data
+### create dummies for variables with multiple categories
+training.data.nn$Yes <- ifelse(training.data.nn$Outcome == "yes", 1, 0)
+training.data.nn$No <- ifelse(training.data.nn$Outcome == "no", 1, 0)
+
+### get rid of the mutiple category variables (only keep dummies)
+training.data.nn <- training.data.nn[, -9]
+
+### fit neural net model with the bestTune parameters 
+nn <- neuralnet(Yes + No ~ ., data = training.data.nn, 
+                hidden = cv.nn$bestTune$size, learningrate = cv.nn$bestTune$decay)
+### plot network
+plot(nn, rep="best")
+```
+
+# Neural Net for Regression Problem
+```{r}
+RNGkind (sample.kind = "Rounding") 
+set.seed(0)
+### call the function for creating 70:30 partition
+p2 <- partition.2(autompg, 0.7)
+training.data <- p2$data.train
+test.data <- p2$data.test
+
+library(caret)
+library(nnet)
+train_control <- trainControl(method="cv", number=10)
+
+cv.nn <- train(mpg ~ . , data = training.data, method = "nnet",
+               preProc = c("center", "scale"), linout = 1,
+               trControl = train_control, tuneLength = 10)
+plot(cv.nn)
+```
+Best size and decay
+```{r}
+cv.nn$bestTune
+```
+Prediction on test data
+```{r}
+pred.test <- predict(cv.nn, test.data)
+pred
+```
+RMSE for test data
+```{r}
+error.test.nn <- pred.test - test.data$mpg
+rmse.test.nn <- sqrt(mean(error.test.nn^2))
+rmse.test.nn
+```
+
+
+
+
+
+
+
+
+
+

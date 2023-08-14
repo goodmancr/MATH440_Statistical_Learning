@@ -1,0 +1,319 @@
+---
+title: "HW1"
+author: "Caroline Goodman"
+date: "2022-10-11"
+output: html_document
+---
+## Consider the dataset BostonHousing.csv. The description of variables is available below. Remove the CAT.MEDV variable from the dataset. The objective is to build a predictive model for median house price (MEDV).
+```{r}
+##importing files and functions
+bos <- read.csv("~/Desktop/MATH 440 - Statistical Learning/BostonHousing.csv")
+source("~/Desktop/MATH 440 - Statistical Learning/myfunctions.R")
+
+##remove CAT.MEDV variable
+bos <- bos[1:(length(bos)-1)]
+
+##split into training and test set
+RNGkind (sample.kind = "Rounding") 
+set.seed(0) ## set seed so that you get same partition each time
+p2 <- partition.2(bos, 0.7) ## creating 70:30 partition
+training.data <- p2$data.train
+test.data <- p2$data.test
+```
+
+## 1. Why should the data be partitioned into training and test sets? What will the training set be used for? What will the test set be used for?
+
+The data should be partitioned into training and test sets because it allows me to develop a more accurate model. A model will be trained using the training set of data. Later, the model will be tested against the test set of data to ensure that the data I collected is applicable in the future and not just the data that the model was trained on.
+
+## Fit a multiple linear regression model to the median house price (MEDV) as a function of CRIM, CHAS, and RM. Write the equation for predicting the median house price using the predictors in the model. 
+
+Multiple Linear Regression Model:
+  y = -27.9555 - 0.3004CRIM + 3.1606CHAS + 8.1418RM
+
+```{r}
+#multiple linear regression
+mlr <- lm(MEDV~ CRIM+CHAS+RM, data = training.data)
+summary(mlr)
+```
+
+## Using the estimated regression model, what median house price is predicted for a tract in the Boston area that does not bound the Charles river, has crime rate of 0.1, and where the average number of rooms per house is 6?
+
+The median house price is predicted to be 20.8653.
+
+```{r}
+# median house prediction
+x0 <- data.frame(CHAS=0,CRIM = 0.1, RM=6)
+predict(mlr, x0)
+```
+
+## Fit a linear regression model with all 12 predictors.
+
+$y = 49.5121 - 0.0767CRIM + 0.0497ZN + 0.0285INDUS + 2.8004CHAS - 21.6768NOX + 3.2950RM + 0.0017AGE - 1.7407DIS + 0.3365RAD - 0.0147TAX - 1.0971PTRATIO - 0.5710LSTAT$
+
+```{r}
+# linear regression model with all 12 predictors
+mlr2 <- lm(MEDV ~ ., data = training.data)
+summary(mlr2)
+```
+
+##Report the RMSE of the model on test data. 
+
+RMSE = 5.1607
+
+```{r}
+# report rmse
+yhat = predict(mlr2, newdata=data.frame(test.data))
+error.test <- yhat - test.data$MEDV
+rmse.test <- sqrt(mean(error.test^2))
+rmse.test
+```
+
+##Is multicollinearity a potential problem for this model? 
+##Compute the correlation table for the numerical predictors and search for highly correlated pairs.
+
+There is multicollinearity because TAX has a vif value > 10. Looking at the correlation table, RAD and TAX form a pair of highly correlated variables with a correlation value of 0.9248. 
+
+```{r}
+# multicollinearity
+library(car)
+vif(mlr2)
+cor(training.data)
+## there is multicollinearity because variables RAD and TAX have high vif values. 
+## RAD and TAX are highly correlated variables with correlation value = 0.92. 
+```
+
+## Use stepwise regression with cross validation approach to reduce the number of predictors. How many variables do you have in the final model? Which variables are dropped? Report the RMSE of this model on test data. 
+
+There are 9 variables in the final model (ZN, CHAS, NOX, RM, DIS, RAD, TAX, PTRATIO, LSTAT). Variables CRIM, INDUS, and AGE were dropped.
+RMSE = 5.299994
+
+```{r}
+# stepwise regression with cv approach 
+library(caret)
+
+## K-fold Cross Validation
+# value of K equal to 5 
+set.seed(0)
+train_control <- trainControl(method = "cv", 
+                              number = 5) 
+
+# Fit K-fold CV model  
+step_kcv <- train(MEDV ~ ., data = training.data,
+                 method = "glmStepAIC", trControl = train_control) 
+print(step_kcv$finalModel)
+
+yhatSW = predict(step_kcv$finalModel, newdata=data.frame(test.data))
+error.test <- yhatSW - test.data$MEDV
+rmse.test <- sqrt(mean(error.test^2))
+rmse.test
+```
+
+## Use lasso penalty to fit a regularized regression model with cross validation approach. Do the same variables disappear as in stepwise approach? Report the RMSE of the model on test data.
+
+$y = 44.2872 -0.0374CRIM + 0.0379ZN + 2.7516CHAS - 18.7300NOX + 3.4901RM - 1.5318DIS + 0.2128RAD - 0.0092TAX - 1.0439PTRATIO - 0.5685LSTAT$
+
+Only two of the variables that disappeared in the stepwise regression also disappeared in the lasso regression model: INDUS and AGE. The CRIM variable disappears in the stepwise approach, but not the lasso approach. 
+
+RMSE = 5.14288
+
+```{r}
+# lasso
+library(glmnet)
+
+# convert data to matrix type
+View(training.data)
+trainX <- as.matrix(training.data[, -9])
+View(trainX)
+testX <- as.matrix(test.data[, -9])
+trainY <- training.data$MEDV
+
+lasso <- glmnet(x = trainX, y = trainY, alpha = 1)
+plot(lasso, xvar = "lambda", main = "Lasso regression")
+
+library(caret)
+set.seed(0)
+train_control <- trainControl(method="cv", number=5)
+
+glmnet.lasso <- train(MEDV ~ ., data = training.data, method = "glmnet",
+                      trControl = train_control, 
+                      tuneGrid = expand.grid(alpha = 1,lambda = seq(0.001,0.1,by = 0.001)))
+
+glmnet.lasso 
+plot(glmnet.lasso)
+
+# best parameter
+glmnet.lasso$bestTune
+
+# best coefficient
+lasso.model <- coef(glmnet.lasso$finalModel, glmnet.lasso$bestTune$lambda)
+lasso.model
+
+# prediction on test data
+yhat.lasso <- predict(glmnet.lasso, s = glmnet.lasso$bestTune, test.data)
+# RMSE for test data
+error.test.lasso <- yhat.lasso - test.data$MEDV
+rmse.test.lasso <- sqrt(mean(error.test.lasso^2))
+rmse.test.lasso
+```
+
+## Compare the models obtained in the above three steps. Create lift charts on test data for all models and comment on that.
+
+RMSE MLR: 5.1607
+
+RMSE STEP: 5.299994
+
+RMSE Lasso: 5.1429
+
+From the lift charts, the models differ slightly.
+
+In the top 40%:
+
+53% of records captured in the top 40% of the MLR model
+
+53% of records captured in the top 40% of the stepwise regression model.
+
+52.5% of records captured in the top 40% of the lasso regression model.
+
+In the top 80%:
+
+87.2% of records captured in the top 80% of the MLR model.
+
+87.0% of records captured in the top 80% of the stepwise regression model.
+
+87.1% of records captured in the top 80% of the lasso regression model.
+
+
+
+```{r}
+library(gains)
+
+# getting Lift chart on test data for multiple regression
+gain <- gains(test.data$MEDV, yhat)
+gain
+
+x <- c(0, gain$depth)
+pred.y <- c(0, gain$cume.pct.of.total)
+avg.y <- c(0, gain$depth/100)
+plot(x, pred.y, main = "Cumulative Lift Chart (MLR)", xlab = "deciles", 
+     ylab = "Percent cumulative response", type = "l", col = "red", cex.lab = 1.5)
+lines(x, avg.y, type = "l")
+
+# getting Lift chart on test data for stepwise regression
+gain <- gains(test.data$MEDV, yhatSW)
+gain
+
+x <- c(0, gain$depth)
+pred.y <- c(0, gain$cume.pct.of.total)
+avg.y <- c(0, gain$depth/100)
+plot(x, pred.y, main = "Cumulative Lift Chart (Stepwise)", xlab = "deciles", 
+     ylab = "Percent cumulative response ", type = "l", col = "red", cex.lab = 1.5)
+lines(x, avg.y, type = "l")
+
+##getting Lift chart on test data for lasso regression
+gain <- gains(test.data$MEDV, yhat.lasso)
+gain
+
+x <- c(0, gain$depth)
+pred.y <- c(0, gain$cume.pct.of.total)
+avg.y <- c(0, gain$depth/100)
+plot(x, pred.y, main = "Cumulative Lift Chart (Lasso)", xlab = "deciles", 
+     ylab = "Percent cumulative response", type = "l", col = "red", cex.lab = 1.5)
+lines(x, avg.y, type = "l")
+```
+## Consider the same dataset BostonHousing.csv. This time use CAT.MEDV as the response variable. CAT.MEDV is a binary variable derived from MEDV so that CAT.MEDV = 1 if MEDV > 30 and CAT.MEDV = 0 otherwise, Only keep CAT.MEDV in your data and remove MEDV. The description of the rest of the variables is available in the table above.
+
+```{r}
+## import original file and functions
+bos <- read.csv("~/Desktop/MATH 440 - Statistical Learning/BostonHousing.csv")
+source("~/Desktop/MATH 440 - Statistical Learning/myfunctions.R")
+
+## removing MEDV and keeping CAT..MEDV
+keeps <- c("CRIM", "ZN", "INDUS", "CHAS", "NOX", "RM", "AGE", "DIS", "RAD","TAX", "PTRATIO", "LSTAT", "CAT..MEDV")
+bos<- bos[keeps]
+```
+
+## Partition the data into training, validation, and test data sets. Create a logistic regression model on training data using all regressors and report the performance of that model on test data. What is the effect on the odds of houses having high median value when the per capita crime rate of a town is increased by 0.1?
+
+Logistic Regression Model:
+ $y = 3.0664 + 0.0649CRIM + 0.0374ZN - 0.1686INDUS + 0.5484CHAS + 0.8802NOX + 1.9310RM + 0.0132AGE - 0.6124DIS + 0.2935RAD - 0.0096TAX - 0.6011PTRATIO - 0.5328LSTAT$
+ 
+RMSE on test  data: 8.6652
+From confusion matrix:
+    Accuracy: 0.9412, Kappa: 0.7657, Sensitivity: 0.7500, Specificity: 0.9767
+    
+For every 0.1 unit increase in per capita crime rate, the odds of houses having high median value increases multiplicatively by 1.0065 times when other predictors remain constant.
+
+```{r}
+#partition the data into training, validation, and test sets
+RNGkind (sample.kind = "Rounding") 
+set.seed(0) ## set seed so that you get same partition each time
+p2 <- partition.3(bos, 0.7,0.2) ## creating 70:20:10 partition
+training.data <- p2$data.train
+test.data <- p2$data.test
+validation.data <- p2$data.val
+
+#create a logistic model on training data
+logistic.model <- glm(CAT..MEDV ~ ., family = binomial(link='logit'), data=training.data)
+summary(logistic.model)
+
+#performance of model on test data
+yhat = predict(logistic.model, newdata = data.frame(test.data))
+## RMSE for test data
+error.test <- test.data$CAT..MEDV - yhat
+rmse.test <- sqrt(mean(error.test^2))
+rmse.test
+
+##confusion matrix
+pred.prob.test <- predict(logistic.model, newdata = test.data, type = "response")
+pred.y.test <- ifelse(pred.prob.test > 0.5, 1, 0) # using cutoff = 0.5
+confusionMatrix(as.factor(pred.y.test), as.factor(test.data$CAT..MEDV),positive = "1")
+
+## effect on the odds of houses having high median value when CRIM increased by 0.1
+exp(0.064884*0.1)
+```
+
+## Considering "1" as the important class, conduct a search for the best cut-off value with the objective of striking a balance between sensitivity and specificity. Report the performance of the optimal model found in this search.
+
+Best cut-off value: 0.3
+
+Accuracy: 0.9412, Kappa: 0.7884, Sensitivity: 0.8750, Specificity: 0.9535
+
+```{r}
+pred.prob.test <- predict(logistic.model, newdata = test.data, type = "response")
+pred.y.test <- ifelse(pred.prob.test > 0.1, 1, 0) # using cutoff = 0.1
+confusionMatrix(as.factor(pred.y.test), as.factor(test.data$CAT..MEDV),positive = "1")
+
+pred.prob.test <- predict(logistic.model, newdata = test.data, type = "response")
+pred.y.test <- ifelse(pred.prob.test > 0.2, 1, 0) # using cutoff = 0.2
+confusionMatrix(as.factor(pred.y.test), as.factor(test.data$CAT..MEDV),positive = "1")
+
+pred.prob.test <- predict(logistic.model, newdata = test.data, type = "response")
+pred.y.test <- ifelse(pred.prob.test > 0.3, 1, 0) # using cutoff = 0.3
+confusionMatrix(as.factor(pred.y.test), as.factor(test.data$CAT..MEDV),positive = "1")
+
+pred.prob.test <- predict(logistic.model, newdata = test.data, type = "response")
+pred.y.test <- ifelse(pred.prob.test > 0.4, 1, 0) # using cutoff = 0.4
+confusionMatrix(as.factor(pred.y.test), as.factor(test.data$CAT..MEDV),positive = "1")
+
+pred.prob.test <- predict(logistic.model, newdata = test.data, type = "response")
+pred.y.test <- ifelse(pred.prob.test > 0.5, 1, 0) # using cutoff = 0.5
+confusionMatrix(as.factor(pred.y.test), as.factor(test.data$CAT..MEDV),positive = "1")
+
+pred.prob.test <- predict(logistic.model, newdata = test.data, type = "response")
+pred.y.test <- ifelse(pred.prob.test > 0.6, 1, 0) # using cutoff = 0.6
+confusionMatrix(as.factor(pred.y.test), as.factor(test.data$CAT..MEDV),positive = "1")
+
+pred.prob.test <- predict(logistic.model, newdata = test.data, type = "response")
+pred.y.test <- ifelse(pred.prob.test > 0.7, 1, 0) # using cutoff = 0.7
+confusionMatrix(as.factor(pred.y.test), as.factor(test.data$CAT..MEDV),positive = "1")
+
+pred.prob.test <- predict(logistic.model, newdata = test.data, type = "response")
+pred.y.test <- ifelse(pred.prob.test > 0.8, 1, 0) # using cutoff = 0.8
+confusionMatrix(as.factor(pred.y.test), as.factor(test.data$CAT..MEDV),positive = "1")
+
+pred.prob.test <- predict(logistic.model, newdata = test.data, type = "response")
+pred.y.test <- ifelse(pred.prob.test > 0.9, 1, 0) # using cutoff = 0.9
+confusionMatrix(as.factor(pred.y.test), as.factor(test.data$CAT..MEDV),positive = "1")
+
+```
+

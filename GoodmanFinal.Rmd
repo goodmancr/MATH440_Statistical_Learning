@@ -1,0 +1,87 @@
+---
+title: "Final"
+author: "Caroline Goodman"
+date: "2022-12-09"
+output: html_document
+---
+
+1. Import the data to R. Call this data set "banking".
+```{r}
+banking <- read.csv("~/Desktop/MATH 440 - Statistical Learning/UniversalBank.csv")
+source("~/Desktop/MATH 440 - Statistical Learning/myfunctions.R")
+```
+Create 3 dummy variables for education.
+```{r}
+banking$Education.UG <- ifelse(banking$Education==1,1,0)
+banking$Education.Grad <- ifelse(banking$Education==2,1,0)
+banking$Education.Ad <- ifelse(banking$Education==3,1,0)
+```
+Drop variables Education, ID, and ZIP.code.
+```{r}
+keeps <- c("Age",
+           "Experience",
+           "Income",
+           "Family",
+           "CCAvg",
+           "Mortgage",
+           "Personal.Loan",
+           "Securities.Account",
+           "CD.Account",
+           "Online",
+           "CreditCard",
+           "Education.UG",
+           "Education.Grad",
+           "Education.Ad")
+banking = banking[keeps]
+```
+Convert response variable Personal.Loan to factor.
+```{r}
+banking$Personal.Loan <- as.factor(banking$Personal.Loan)
+levels(banking$Personal.Loan) <- c("no","yes")
+```
+Partition the data into training and testing using 70:30 partition.
+```{r}
+RNGkind (sample.kind = "Rounding") 
+set.seed(0) ## set seed so that you get same partition each time
+p2 <- partition.2(banking, 0.7) ## creating 70:30 partition
+training.data <- p2$data.train
+test.data <- p2$data.test
+```
+Create a neural network model used for predicting Personal.Loan.
+
+1. Use cross-validation method to build the neural network.
+```{r}
+library(caret)
+library(nnet)
+train_control <- trainControl(method="cv", number=10)
+## size refers to the number of hidden nodes and decay is the learning rate
+tune.grid <- expand.grid(size = seq(from = 1, to = 10, by = 1),
+                         decay = seq(from = 0.1, to = 0.5, by = 0.1))
+cv.nn <- train(Personal.Loan ~ . , data = training.data, method = "nnet",
+               preProc = c("center", "scale"),
+               trControl = train_control, tuneGrid = tune.grid)
+```
+
+Evaluating the model:  
+```{r}
+print(cv.nn)
+plot(cv.nn)
+
+# Best size and decay
+cv.nn$bestTune
+```
+# From the cross-validation method used to build the neural network, it was determined that size = 10 and decay = 0.1 were the final and best tuning parameters for the model. These parameters, size = 10 and decay = 0.1, build the most accurate neural network model, with an accuracy of 0.9817134. 
+Prediction on test data:
+```{r}
+pred.prob <- predict(cv.nn, test.data, type = "prob")
+pred.y.nn <- ifelse(pred.prob[,2] > 0.5, "yes", "no") # using cutoff = 0.5
+confusionMatrix(as.factor(pred.y.nn), as.factor(test.data$Personal.Loan), 
+                positive = "yes")
+```
+
+# Kappa: 0.9135
+# Sensitivity: 0.9128
+# Specificity: 0.9926
+# Accuracy: 0.9847
+
+# The confusion matrix calculates evaluative variables such as kappa, sensitivity, specificity, and accuracy. These calculations allow us to understand how the neural network performed on the test data, in terms of classifying the response variable, Personal.Loan. With regard to the kappa value, a value of 1 implies perfect agreement. The kappa value here, 0.9135, implies a very good level of agreement. Sensitivity refers to the model's ability to detect the important class (the probability of Personal.Loan classified as "yes" conditioned on truly being "yes"), while specificity refers to the model's ability to rule out the unimportant class (the probability of Personal.Loan classified as "no" conditioned on truly being "no"). The neural network's sensitivity was found to be 0.9128 and the specificity was found to be 0.9926. This means that the model is better at ruling out the unimportant class than detecting the important class, but this does not mean the model is necessarily "bad" at detecting the important class. The values of sensitivity and specificity are still high, along with the kappa value and overall accuracy of the model, 0.9847. These numbers reveal that the neural network performed relatively well when evaluated on the test data. This would be a good model to use. 

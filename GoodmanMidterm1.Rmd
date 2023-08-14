@@ -1,0 +1,173 @@
+---
+title: "Midterm 1"
+author: "Caroline Goodman"
+date: "2022-10-18"
+output: html_document
+---
+
+Consider the dataset on wine quality wine.csv 
+
+The objective is to predict the type of wine (red = "0", white = "1") based on the other attributes.
+
+For this analysis, we are working with a supervised learning technique dealing with classification of wine as either red wine or white wine based on the data given. 
+
+```{r}
+rm(list = ls())
+
+## import wine file and my functions
+dat <- read.csv("~/Desktop/MATH 440 - Statistical Learning/wine.csv")
+dat$quality <- as.factor(dat$quality)
+source("~/Desktop/MATH 440 - Statistical Learning/myfunctions.R")
+
+## partition the data
+RNGkind(sample.kind = "Rounding")
+set.seed(0)
+p2 <- partition.2(dat, 0.7) ## create 70:30 partition of wine data
+training.data <- p2$data.train
+test.data <- p2$data.test
+```
+
+Here, I train the data on the training data, and output a summary and confidence intervals (for both the regression coefficients and the odds ratios). 
+```{r}
+logistic.model <- glm(Type ~ ., family = binomial(link = 'logit'), data = training.data)
+summary(logistic.model)
+
+confint.default(logistic.model)
+exp(confint.default(logistic.model))
+
+library(car)
+vif(logistic.model)
+```
+From the vif function output, we can see that density has a very high vif value of 21.457, indicating multicollinearity within the model. 
+```{r}
+## confusion matrix on training
+library(caret)
+pred.prob.train <- logistic.model$fitted.values
+pred.y.train <- ifelse(pred.prob.train > 0.5, 1, 0) # using cutoff = 0.5
+confusionMatrix(as.factor(pred.y.train), as.factor(training.data$Type), 
+                positive = "1")
+
+## confusion matrix on test
+pred.prob.test <- predict(logistic.model, newdata = test.data,type = "response")
+pred.y.test <- ifelse(pred.prob.test > 0.5, 1, 0) # using cutoff = 0.5
+confusionMatrix(as.factor(pred.y.test), as.factor(test.data$Type), 
+                positive = "1")
+```
+
+Performance of logistic model on training data:
+
+Kappa: 0.9834
+
+Accuracy: 0.9917
+
+Sensitivity: 0.9952
+
+Specificity: 0.9884
+
+Performance of logistic model on test data:
+
+Kappa: 0.9892
+
+Accuracy: 0.9946
+
+Sensitivity: 0.9955
+
+Specificity: 0.9938
+
+From this output, I can see certain variables have greater significance than others. 
+For each variable whose confidence interval for odds ratio includes 1, I will remove it from the model. These variables whose odds ratio confidence interval includes 0 are: citric.acid, sulphates, and quality. 
+
+```{r}
+## run logistic regression again with the three insignificant variables removed
+logistic.model2 <- glm(Type ~ fixed.acidity + volatile.acidity +residual.sugar+ chlorides+ free.sulfur.dioxide+ total.sulfur.dioxide+ density+ pH+ alcohol, family = binomial(link = 'logit'), data = training.data)
+summary(logistic.model2)
+
+confint.default(logistic.model2)
+exp(confint.default(logistic.model2))
+```
+
+Above, I trained a model with the insignificant variables removed. Now, I am going to perform variable selection using stepwise regression, to see the effect on both the original model (logistic.model) and also the reduced model (logistic.model2).
+
+We see in the stepwise regression of the original logistic model that sulphates is removed first, quality is removed second, and citric.acid is removed third. 
+
+In the stepwise regression of the reduced model, there are no variables removed, as the AIC value can not be reduced any further. 
+
+```{r}
+step.model <- step(logistic.model)
+```
+
+```{r}
+step.model <- step(logistic.model2)
+```
+
+Lastly, I want to check the vif values of the reduced logistic model.
+
+```{r}
+library(car)
+vif(logistic.model2)
+```
+
+As we can see, density's vif value has decreased from the original model, but is still greater than 10, which remains a matter of concern regarding multicollinearity within the model.
+
+To further analyze this data, I want to try a 10-fold cross validation technique.
+
+```{r}
+library(caret)
+
+training.data$Type <- as.factor(training.data$Type)
+levels(training.data$Type) <- c("red", "white")
+
+## k-fold cross validation: value of k = 10
+set.seed(0)
+train_control <- trainControl(method = "cv", number = 10,
+                              classProbs = TRUE, summaryFunction = twoClassSummary)
+
+logistic_kcv <- train(Type ~ ., data = training.data,  
+                 method = "glm", family = "binomial", 
+                 metric = "Kappa", trControl = train_control) 
+print(logistic_kcv)
+logistic_kcv$finalModel
+
+pred.prob.test <- predict(logistic_kcv, newdata = test.data, type = "prob")
+pred.y.test <- ifelse(pred.prob.test[,2] > 0.5, 1, 0) # using cutoff = 0.5
+confusionMatrix(as.factor(pred.y.test), as.factor(test.data$Type), 
+                positive = "1")
+```
+
+Run logistic regression again with the three insignificant variables removed (and also remove density because of how high it's vif value is - just to see how the model would perform )
+```{r}
+logistic.model3 <- glm(Type ~ fixed.acidity + volatile.acidity +residual.sugar+ chlorides+ free.sulfur.dioxide+ total.sulfur.dioxide+ pH+ alcohol, family = binomial(link = 'logit'), data = training.data)
+summary(logistic.model3)
+
+confint.default(logistic.model3)
+exp(confint.default(logistic.model3))
+```
+
+```{r}
+library(car)
+vif(logistic.model3)
+
+## confusion matrix on test
+pred.prob.test <- predict(logistic.model3, newdata = test.data,type = "response")
+pred.y.test <- ifelse(pred.prob.test > 0.5, 1, 0) # using cutoff = 0.5
+confusionMatrix(as.factor(pred.y.test), as.factor(test.data$Type), 
+                positive = "1")
+```
+Performance of logistic.model3 (without citric.acid, sulphates, quality, and density):
+
+Kappa: 0.9677
+
+Accuracy: 0.9839
+
+Sensitivity: 0.9866
+
+Specificity: 0.9813
+
+Ultimately, if we remove density on top of removing citric acid, sulphates, and quality, the vif factors are all in the range that reveal almost no multicollinearity at the cost of lower kappa values, accuracy levels, and sensitivity & specificity values (just not by much). However, they are still high values.
+
+I started this analysis using a logistic regression by regressing "Type" of wine on all of the variables. After computing confidence intervals of odds ratio and further calculating vif values and the confusion matrix for the model, I determined three of the variables (citric.acid, sulphates, and quality) to be insignificant to the model. To further analyze this, I removed these variables from the model and recalculated confidence intervals, vif values, and confusion matrices. Although all of the variables contributing to the model were now significant, I still found a high vif value for density-indicating possible multicollinearity in the model. To double check the variables that I removed were in fact insignificant, I used stepwise regression to see which variables the stepwise function would remove based on their AIC values. The stepwise regression removed the same variables. So at this point, it was a decision of whether to remove density as a variable or not. After removing not just citric.acid, sulphates, and quality, but also density, the performance on the test data was lower than that of the first two models, but the vif values of this model did not indicate any sign of multicollinearity.
+
+Ultimately, the final model (excluding variables citric.acid, sulphates, quality, and density) came to be:
+
+$y = 47.124623 - 1.484658fixed.acidity - 12.522887volatile.acidity + 0.108140residual.sugar - 42.426091chlorides - 0.051937free.sulfur.dioxide + 0.058496total.sulfur.dioxide - 9.259589pH - 0.262909alcohol$
+
